@@ -62,53 +62,62 @@
     <div id="answer"></div>
 
     <script>
-    const form = document.getElementById("f");
-    const input = document.getElementById("q");
-    const answer = document.getElementById("answer");
-    const button = document.getElementById("send");
+        const form = document.getElementById("f");
+        const input = document.getElementById("q");
+        const answer = document.getElementById("answer");
+        const button = document.getElementById("send");
 
-    function el(tag, text, cls) {
-      const e = document.createElement(tag);
-      e.textContent = text;
-      if (cls) e.className = cls;
-      return e;
-    }
-
-    function render(data) {
-      answer.innerHTML = "";
-      for (const s of data.steps) {
-        if (s.type === "tool") {
-          const box = el("div", "", "step");
-          box.append(el("div", `Tur ${s.turn}: araç çağrısı → ${s.name}`, "title"));
-          box.append(el("div", `girdi: ${s.args}`, "muted"));
-          box.append(el("div", `sonuç: ${s.result}`, "muted"));
-          answer.append(box);
-        } else {
-          const box = el("div", "", "step final");
-          box.append(el("div", `Tur ${s.turn}: nihai cevap`, "title"));
-          box.append(el("div", s.text));
-          answer.append(box);
+        function el(tag, text, cls) {
+            const e = document.createElement(tag);
+            e.textContent = text;
+            if (cls) e.className = cls;
+            return e;
         }
-      }
-    }
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const q = input.value.trim();
-      if (!q) return;
+        function render(data) {
+            answer.innerHTML = "";
+            for (const s of data.steps) {
+                if (s.type === "tool") {
+                    // mevcut kod aynen kalsın
+                } else if (s.type === "pending") {
+                    const box = el("div", "", "step");
+                    box.append(el("div", `Tur ${s.turn}: onay bekliyor → ${s.name}`, "title"));
+                    box.append(el("div", `girdi: ${s.args}`, "muted"));
+                    const btn = el("button", "Onayla");
+                    const out = el("div", "", "muted");
+                    btn.addEventListener("click", async () => {
+                        btn.disabled = true;
+                        const r = await fetch("/onayla?id=" + encodeURIComponent(s.id));
+                        out.textContent = "sonuç: " + (await r.text());
+                    });
+                    box.append(btn, out);
+                    answer.append(box);
+                } else {
+                    const box = el("div", "", "step final");
+                    box.append(el("div", `Tur ${s.turn}: nihai cevap`, "title"));
+                    box.append(el("div", s.text));
+                    answer.append(box);
+                }
+            }
+        }
 
-      button.disabled = true;
-      answer.textContent = "Düşünüyor...";
-      try {
-        const res = await fetch("/agent?q=" + encodeURIComponent(q));
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        render(await res.json());
-      } catch (err) {
-        answer.textContent = "Hata: " + err.message;
-      } finally {
-        button.disabled = false;
-      }
-    });
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const q = input.value.trim();
+            if (!q) return;
+
+            button.disabled = true;
+            answer.textContent = "Düşünüyor...";
+            try {
+                const res = await fetch("/agent?q=" + encodeURIComponent(q));
+                if (!res.ok) throw new Error("HTTP " + res.status);
+                render(await res.json());
+            } catch (err) {
+                answer.textContent = "Hata: " + err.message;
+            } finally {
+                button.disabled = false;
+            }
+        });
     </script>
 </body>
 </html>

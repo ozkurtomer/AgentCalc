@@ -1,6 +1,7 @@
 using AgentCalc;
 using System.Globalization;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -77,8 +78,11 @@ var tools = new object[]
     TwoNumberTool("cikar", "İki sayıyı çıkarır: a - b"),
     TwoNumberTool("carp", "İki sayıyı çarpar"),
     TwoNumberTool("bol", "İki sayıyı böler: a / b"),
-    NoArgTool("simdi", "Şu anki tarih ve saati döndürür")
+    NoArgTool("simdi", "Şu anki tarih ve saati döndürür"),
+    NoteTool(),
 };
+
+var pendingActions = new ConcurrentDictionary<string, (string Name, string ArgsJson)>();
 
 app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 {
@@ -106,6 +110,15 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
             var fn = call.GetProperty("function");
             var name = fn.GetProperty("name").GetString() ?? "";
             var args = fn.GetProperty("arguments");
+
+            if (name == "notEkle")
+            {
+                var id = Guid.NewGuid().ToString("N");
+                pendingActions[id] = (name, args.GetRawText());
+                steps.Add(new { turn, type = "pending", id, name, args = args.GetRawText() });
+                return Results.Json(new { answer = "Bu işlem onayınızı bekliyor.", steps });
+            }
+
             var result = RunTool(name, args);
 
             messages.Add(new { role = "tool", content = result });
@@ -114,6 +127,16 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
     }
 
     return Results.Json(new { answer = "Üst sınıra ulaşıldı.", steps });
+});
+
+app.MapGet("/onayla", (string id) =>
+{
+    if (!pendingActions.TryRemove(id, out var action))
+        return Results.NotFound("Bekleyen işlem yok veya zaten onaylandı.");
+
+    var args = JsonDocument.Parse(action.ArgsJson).RootElement;
+    var result = RunTool(action.Name, args);
+    return Results.Text(result);
 });
 
 app.Run();
@@ -136,7 +159,16 @@ static string RunTool(string name, JsonElement args)
     try
     {
         if (name == "simdi")
+        {
             return DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        }
+
+        if (name == "notEkle")
+        {
+            var metin = args.GetProperty("metin").GetString() ?? "";
+            File.AppendAllText("notlar.txt", $"{DateTime.Now:yyyy-MM-dd HH:mm} {metin}{Environment.NewLine}");
+            return "Not kaydedildi.";
+        }
 
         double a = args.GetProperty("a").GetDouble();
         double b = args.GetProperty("b").GetDouble();
@@ -188,6 +220,25 @@ static object NoArgTool(string name, string description) => new
             type = "object",
             properties = new { },
             required = Array.Empty<string>()
+        }
+    }
+};
+
+static object NoteTool() => new
+{
+    type = "function",
+    function = new
+    {
+        name = "notEkle",
+        description = "Kullanıcı açıkça bir not kaydetmek istediğinde kullanılır. Veriyi değiştirir.",
+        parameters = new
+        {
+            type = "object",
+            properties = new
+            {
+                metin = new { type = "string", description = "kaydedilecek not metni" }
+            },
+            required = new[] { "metin" }
         }
     }
 };
