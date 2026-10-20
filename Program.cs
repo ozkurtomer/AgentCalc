@@ -1,7 +1,13 @@
-using AgentCalc;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
-using System.Collections.Concurrent;
+using System.Threading.RateLimiting;
+using AgentCalc;
+using Microsoft.AspNetCore.RateLimiting;
+
+const string SystemPrompt =
+    "Sen çocuklar için bir matematik asistanısın. Sadece matematik ve hesaplama sorularını yanıtla. " +
+    "Başka konuları nazikçe reddet ve bir matematik sorusu sormalarını iste. Kısa, sade ve anlaşılır Türkçe kullan.";
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,89 +17,75 @@ builder.Services.AddHttpClient("ollama", c =>
     c.Timeout = TimeSpan.FromMinutes(2);
 });
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("agent", context =>
+    {
+        // Tünel üzerinden gelen isteklerin gerçek IP'si CF-Connecting-IP başlığında
+        var ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
+                 ?? context.Connection.RemoteIpAddress?.ToString()
+                 ?? "anon";
+
+        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+});
+
 var app = builder.Build();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseRateLimiter();
 
-app.MapGet("/ask", async (string q, IHttpClientFactory factory) =>
-{
-    var http = factory.CreateClient("ollama");
+var allowWrites = app.Configuration.GetValue<bool>("Agent:AllowWrites");
 
-    var body = new
-    {
-        model = "qwen2.5:7b",
-        messages = new[] { new { role = "user", content = q } },
-        stream = false
-    };
+// Tüm hesap işlemleri kayıttan geliyor, ek olarak saat ve (isteğe bağlı) not aracı
+var tools = Calculator.Tools.Select(Calculator.Schema).ToList();
+tools.Add(NoArgTool("simdi", "Şu anki tarih ve saati döndürür"));
 
-    var res = await http.PostAsJsonAsync("/api/chat", body);
-    res.EnsureSuccessStatusCode();
+if (allowWrites)
+    tools.Add(NoteTool());
 
-    var json = await res.Content.ReadFromJsonAsync<JsonElement>();
-    return json.GetProperty("message").GetProperty("content").GetString();
-});
-
-app.MapGet("/tool-test", async (string q, IHttpClientFactory factory) =>
-{
-    var http = factory.CreateClient("ollama");
-
-    var body = new
-    {
-        model = "qwen2.5:7b",
-        messages = new[] { new { role = "user", content = q } },
-        tools = new[]
-        {
-            new
-            {
-                type = "function",
-                function = new
-                {
-                    name = "topla",
-                    description = "İki sayıyı toplar",
-                    parameters = new
-                    {
-                        type = "object",
-                        properties = new
-                        {
-                            a = new { type = "number", description = "ilk sayı" },
-                            b = new { type = "number", description = "ikinci sayı" }
-                        },
-                        required = new[] { "a", "b" }
-                    }
-                }
-            }
-        },
-        stream = false
-    };
-
-    var res = await http.PostAsJsonAsync("/api/chat", body);
-    res.EnsureSuccessStatusCode();
-    return await res.Content.ReadAsStringAsync();
-});
-
-var tools = new object[]
-{
-    TwoNumberTool("topla", "İki sayıyı toplar"),
-    TwoNumberTool("cikar", "İki sayıyı çıkarır: a - b"),
-    TwoNumberTool("carp", "İki sayıyı çarpar"),
-    TwoNumberTool("bol", "İki sayıyı böler: a / b"),
-    NoArgTool("simdi", "Şu anki tarih ve saati döndürür"),
-    NoteTool(),
-};
-
+var toolArray = tools.ToArray();
 var pendingActions = new ConcurrentDictionary<string, (string Name, string ArgsJson)>();
+
+app.MapGet("/health", async (IHttpClientFactory factory) =>
+{
+    try
+    {
+        var http = factory.CreateClient("ollama");
+        http.Timeout = TimeSpan.FromSeconds(3);
+        var res = await http.GetAsync("/api/tags");
+        return Results.Json(new { ok = res.IsSuccessStatusCode });
+    }
+    catch
+    {
+        return Results.Json(new { ok = false });
+    }
+});
 
 app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 {
+    if (string.IsNullOrWhiteSpace(q) || q.Length > 200)
+        return Results.BadRequest("Lütfen 1-200 karakter arasında yazın.");
+
     var http = factory.CreateClient("ollama");
-    var messages = new List<object> { new { role = "user", content = q } };
+    var messages = new List<object>
+    {
+        new { role = "system", content = SystemPrompt },
+        new { role = "user", content = q }
+    };
     var steps = new List<object>();
     const int maxTurns = 5;
 
     for (int turn = 1; turn <= maxTurns; turn++)
     {
-        var res = await Chat(http, messages, tools);
+        var res = await Chat(http, messages, toolArray);
         var msg = res.GetProperty("message");
 
         if (!msg.TryGetProperty("tool_calls", out var calls))
@@ -111,6 +103,14 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
             var name = fn.GetProperty("name").GetString() ?? "";
             var args = fn.GetProperty("arguments");
 
+            if (name == "notEkle" && !allowWrites)
+            {
+                const string kapali = "Bu araç bu sunucuda kapalı.";
+                messages.Add(new { role = "tool", content = kapali });
+                steps.Add(new { turn, type = "tool", name, args = args.GetRawText(), result = kapali });
+                continue;
+            }
+
             if (name == "notEkle")
             {
                 var id = Guid.NewGuid().ToString("N");
@@ -120,14 +120,13 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
             }
 
             var result = RunTool(name, args);
-
             messages.Add(new { role = "tool", content = result });
             steps.Add(new { turn, type = "tool", name, args = args.GetRawText(), result });
         }
     }
 
     return Results.Json(new { answer = "Üst sınıra ulaşıldı.", steps });
-});
+}).RequireRateLimiting("agent");
 
 app.MapGet("/onayla", (string id) =>
 {
@@ -137,7 +136,7 @@ app.MapGet("/onayla", (string id) =>
     var args = JsonDocument.Parse(action.ArgsJson).RootElement;
     var result = RunTool(action.Name, args);
     return Results.Text(result);
-});
+}).RequireRateLimiting("agent");
 
 app.Run();
 
@@ -159,9 +158,7 @@ static string RunTool(string name, JsonElement args)
     try
     {
         if (name == "simdi")
-        {
             return DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-        }
 
         if (name == "notEkle")
         {
@@ -170,43 +167,13 @@ static string RunTool(string name, JsonElement args)
             return "Not kaydedildi.";
         }
 
-        double a = args.GetProperty("a").GetDouble();
-        double b = args.GetProperty("b").GetDouble();
-
-        return name switch
-        {
-            "topla" => Calculator.Topla(a, b).ToString(CultureInfo.InvariantCulture),
-            "cikar" => Calculator.Cikar(a, b).ToString(CultureInfo.InvariantCulture),
-            "carp" => Calculator.Carp(a, b).ToString(CultureInfo.InvariantCulture),
-            "bol" => Calculator.Bol(a, b).ToString(CultureInfo.InvariantCulture),
-            _ => $"Bilinmeyen araç: {name}"
-        };
+        return Calculator.Run(name, args);
     }
     catch (Exception ex)
     {
         return $"Hata: {ex.Message}";
     }
 }
-
-static object TwoNumberTool(string name, string description) => new
-{
-    type = "function",
-    function = new
-    {
-        name,
-        description,
-        parameters = new
-        {
-            type = "object",
-            properties = new
-            {
-                a = new { type = "number", description = "ilk sayı" },
-                b = new { type = "number", description = "ikinci sayı" }
-            },
-            required = new[] { "a", "b" }
-        }
-    }
-};
 
 static object NoArgTool(string name, string description) => new
 {
