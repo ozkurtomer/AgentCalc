@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text.Json;
 
 namespace AgentCalc;
@@ -11,7 +11,6 @@ public static class Calculator
 {
     public static readonly IReadOnlyList<CalcTool> Tools = new List<CalcTool>
     {
-        // İki sayılı işlemler
         new("topla", "İki sayıyı toplar", Arity.Two, p => p[0] + p[1]),
         new("cikar", "İki sayıyı çıkarır: a - b", Arity.Two, p => p[0] - p[1]),
         new("carp", "İki sayıyı çarpar", Arity.Two, p => p[0] * p[1]),
@@ -30,7 +29,6 @@ public static class Calculator
         new("log", "a sayısının b tabanına göre logaritmasını alır", Arity.Two, p => Log(p[0], p[1])),
         new("hipotenus", "Dik kenarları a ve b olan üçgenin hipotenüsünü hesaplar", Arity.Two, p => Math.Sqrt(p[0] * p[0] + p[1] * p[1])),
 
-        // Tek sayılı işlemler
         new("karekok", "Bir sayının karekökünü alır", Arity.One, p => Karekok(p[0])),
         new("kare", "Bir sayının karesini alır", Arity.One, p => p[0] * p[0]),
         new("kup", "Bir sayının küpünü alır", Arity.One, p => p[0] * p[0] * p[0]),
@@ -50,12 +48,10 @@ public static class Calculator
         new("radyan", "Dereceyi radyana çevirir", Arity.One, p => p[0] * Math.PI / 180),
         new("derece", "Radyanı dereceye çevirir", Arity.One, p => p[0] * 180 / Math.PI),
 
-        // Parametresiz sabitler
         new("pi", "Pi sayısının değerini verir", Arity.None, _ => Math.PI),
         new("e", "Euler sayısının değerini verir", Arity.None, _ => Math.E),
     };
 
-    // Modele giden araç şemasını kayıttan üretir
     public static object Schema(CalcTool t)
     {
         var names = t.Arity switch
@@ -64,6 +60,9 @@ public static class Calculator
             Arity.Two => new[] { "a", "b" },
             _ => Array.Empty<string>()
         };
+
+        if (names.Length == 0)
+            return new { type = "function", function = new { name = t.Name, description = t.Description } };
 
         var props = names.ToDictionary(n => n, n => (object)new
         {
@@ -83,7 +82,6 @@ public static class Calculator
         };
     }
 
-    // Model çağrısının argümanlarını okuyup doğru işlemi çalıştırır
     public static string Run(string name, JsonElement args)
     {
         var tool = Tools.FirstOrDefault(t => t.Name == name);
@@ -102,8 +100,6 @@ public static class Calculator
 
         return sonuc.ToString(CultureInfo.InvariantCulture);
     }
-
-    // ---------- İşlem yardımcıları ----------
 
     static double Tam(double x, string ad)
     {

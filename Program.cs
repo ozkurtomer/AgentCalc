@@ -1,20 +1,26 @@
+using AgentCalc;
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading.RateLimiting;
-using AgentCalc;
-using Microsoft.AspNetCore.RateLimiting;
 
 const string SystemPrompt =
     "Sen çocuklar için bir matematik asistanısın. Sadece matematik ve hesaplama sorularını yanıtla. " +
+    "Hesap yaparken mutlaka araçları kullan, sonucu kendin tahmin etme. " +
     "Başka konuları nazikçe reddet ve bir matematik sorusu sormalarını iste. Kısa, sade ve anlaşılır Türkçe kullan.";
+
+const string Model = "gemini-2.5-flash";
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHttpClient("ollama", c =>
+var apiKey = builder.Configuration["GEMINI_API_KEY"] ?? "";
+
+builder.Services.AddHttpClient("llm", c =>
 {
-    c.BaseAddress = new Uri("http://localhost:11434");
+    c.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/openai/");
     c.Timeout = TimeSpan.FromMinutes(2);
+    c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 });
 
 builder.Services.AddRateLimiter(options =>
@@ -22,7 +28,6 @@ builder.Services.AddRateLimiter(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy("agent", context =>
     {
-        // Tünel üzerinden gelen isteklerin gerçek IP'si CF-Connecting-IP başlığında
         var ip = context.Request.Headers["CF-Connecting-IP"].FirstOrDefault()
                  ?? context.Connection.RemoteIpAddress?.ToString()
                  ?? "anon";
@@ -44,7 +49,6 @@ app.UseRateLimiter();
 
 var allowWrites = app.Configuration.GetValue<bool>("Agent:AllowWrites");
 
-// Tüm hesap işlemleri kayıttan geliyor, ek olarak saat ve (isteğe bağlı) not aracı
 var tools = Calculator.Tools.Select(Calculator.Schema).ToList();
 tools.Add(NoArgTool("simdi", "Şu anki tarih ve saati döndürür"));
 
@@ -54,27 +58,14 @@ if (allowWrites)
 var toolArray = tools.ToArray();
 var pendingActions = new ConcurrentDictionary<string, (string Name, string ArgsJson)>();
 
-app.MapGet("/health", async (IHttpClientFactory factory) =>
-{
-    try
-    {
-        var http = factory.CreateClient("ollama");
-        http.Timeout = TimeSpan.FromSeconds(3);
-        var res = await http.GetAsync("/api/tags");
-        return Results.Json(new { ok = res.IsSuccessStatusCode });
-    }
-    catch
-    {
-        return Results.Json(new { ok = false });
-    }
-});
+app.MapGet("/health", () => Results.Json(new { ok = !string.IsNullOrWhiteSpace(apiKey) }));
 
 app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 {
     if (string.IsNullOrWhiteSpace(q) || q.Length > 200)
         return Results.BadRequest("Lütfen 1-200 karakter arasında yazın.");
 
-    var http = factory.CreateClient("ollama");
+    var http = factory.CreateClient("llm");
     var messages = new List<object>
     {
         new { role = "system", content = SystemPrompt },
@@ -85,12 +76,15 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 
     for (int turn = 1; turn <= maxTurns; turn++)
     {
-        var res = await Chat(http, messages, toolArray);
-        var msg = res.GetProperty("message");
+        var msg = await Chat(http, messages, toolArray);
 
-        if (!msg.TryGetProperty("tool_calls", out var calls))
+        if (!msg.TryGetProperty("tool_calls", out var calls)
+            || calls.ValueKind != JsonValueKind.Array
+            || calls.GetArrayLength() == 0)
         {
-            var answer = msg.GetProperty("content").GetString() ?? "";
+            var answer = msg.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.String
+                ? c.GetString() ?? ""
+                : "";
             steps.Add(new { turn, type = "answer", text = answer });
             return Results.Json(new { answer, steps });
         }
@@ -99,14 +93,15 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 
         foreach (var call in calls.EnumerateArray())
         {
+            var callId = call.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
             var fn = call.GetProperty("function");
             var name = fn.GetProperty("name").GetString() ?? "";
-            var args = fn.GetProperty("arguments");
+            var args = ParseArgs(fn.GetProperty("arguments"));
 
             if (name == "notEkle" && !allowWrites)
             {
                 const string kapali = "Bu araç bu sunucuda kapalı.";
-                messages.Add(new { role = "tool", content = kapali });
+                messages.Add(new { role = "tool", tool_call_id = callId, content = kapali });
                 steps.Add(new { turn, type = "tool", name, args = args.GetRawText(), result = kapali });
                 continue;
             }
@@ -120,7 +115,7 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
             }
 
             var result = RunTool(name, args);
-            messages.Add(new { role = "tool", content = result });
+            messages.Add(new { role = "tool", tool_call_id = callId, content = result });
             steps.Add(new { turn, type = "tool", name, args = args.GetRawText(), result });
         }
     }
@@ -142,16 +137,23 @@ app.Run();
 
 static async Task<JsonElement> Chat(HttpClient http, List<object> messages, object[] tools)
 {
-    var res = await http.PostAsJsonAsync("/api/chat", new
+    var res = await http.PostAsJsonAsync("chat/completions", new
     {
-        model = "qwen2.5:7b",
+        model = Model,
         messages,
         tools,
-        stream = false
+        tool_choice = "auto",
+        temperature = 0
     });
     res.EnsureSuccessStatusCode();
-    return await res.Content.ReadFromJsonAsync<JsonElement>();
+    var json = await res.Content.ReadFromJsonAsync<JsonElement>();
+    return json.GetProperty("choices")[0].GetProperty("message");
 }
+
+static JsonElement ParseArgs(JsonElement arguments) =>
+    arguments.ValueKind == JsonValueKind.String
+        ? JsonDocument.Parse(string.IsNullOrWhiteSpace(arguments.GetString()) ? "{}" : arguments.GetString()!).RootElement
+        : arguments;
 
 static string RunTool(string name, JsonElement args)
 {
@@ -178,17 +180,7 @@ static string RunTool(string name, JsonElement args)
 static object NoArgTool(string name, string description) => new
 {
     type = "function",
-    function = new
-    {
-        name,
-        description,
-        parameters = new
-        {
-            type = "object",
-            properties = new { },
-            required = Array.Empty<string>()
-        }
-    }
+    function = new { name, description }
 };
 
 static object NoteTool() => new

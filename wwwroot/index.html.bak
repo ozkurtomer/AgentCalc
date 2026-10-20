@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hesap Dostu</title>
+    <style>
+        :root {
+            --bg1: #fef3c7;
+            --bg2: #dbeafe;
+            --card: #ffffff;
+            --text: #1e293b;
+            --muted: #64748b;
+            --primary: #7c3aed;
+            --ok: #16a34a;
+            --warn: #ea580c;
+            --tool: #0891b2;
+            --pending: #f59e0b;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "Segoe UI", "Comic Sans MS", Arial, sans-serif;
+            color: var(--text);
+            background: linear-gradient(135deg, var(--bg1), var(--bg2));
+            background-attachment: fixed;
+        }
+
+        main {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 32px 16px 64px;
+        }
+
+        header {
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 56px;
+            display: inline-block;
+            animation: wiggle 2.5s ease-in-out infinite;
+        }
+
+        header h1 {
+            font-size: 36px;
+            margin: 8px 0 4px;
+        }
+
+        header p {
+            color: var(--muted);
+            margin: 0 0 16px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: #fff;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #cbd5e1;
+        }
+
+        .badge.on .dot {
+            background: var(--ok);
+            animation: pulse 1.6s infinite;
+        }
+
+        .badge.off .dot {
+            background: #dc2626;
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+            margin: 18px 0;
+        }
+
+        .chip {
+            background: #fff;
+            border: 2px solid #e9d5ff;
+            color: var(--primary);
+            border-radius: 999px;
+            padding: 6px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.15s;
+        }
+
+            .chip:hover {
+                transform: translateY(-2px) scale(1.04);
+            }
+
+        form {
+            display: flex;
+            gap: 8px;
+            background: var(--card);
+            padding: 8px;
+            border-radius: 18px;
+            box-shadow: 0 8px 24px rgba(124, 58, 237, 0.12);
+        }
+
+        input {
+            flex: 1;
+            border: none;
+            outline: none;
+            padding: 12px 14px;
+            font-size: 17px;
+            background: transparent;
+            color: var(--text);
+        }
+
+        button#send {
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 14px;
+            padding: 12px 22px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+            button#send:active {
+                transform: scale(0.96);
+            }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+
+        #answer {
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .step {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 14px 16px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+            border-left: 6px solid #cbd5e1;
+            animation: pop 0.4s ease both;
+            font-size: 15px;
+        }
+
+            .step.tool {
+                border-left-color: var(--tool);
+            }
+
+            .step.pending {
+                border-left-color: var(--pending);
+            }
+
+            .step.final {
+                border-left-color: var(--ok);
+                font-size: 18px;
+            }
+
+            .step.error {
+                border-left-color: var(--warn);
+            }
+
+        .title {
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 13px;
+            margin-top: 3px;
+            word-break: break-word;
+        }
+
+        .pending button {
+            margin-top: 10px;
+            background: var(--pending);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 8px 16px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .thinking {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+            .thinking span {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                background: var(--primary);
+                animation: bounce 1s infinite;
+            }
+
+                .thinking span:nth-child(2) {
+                    animation-delay: 0.15s;
+                }
+
+                .thinking span:nth-child(3) {
+                    animation-delay: 0.3s;
+                }
+
+        @keyframes pop {
+            from {
+                opacity: 0;
+                transform: translateY(10px) scale(0.98);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: translateY(0);
+            }
+
+            40% {
+                transform: translateY(-8px);
+            }
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5);
+            }
+
+            70% {
+                box-shadow: 0 0 0 8px rgba(22, 163, 74, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(22, 163, 74, 0);
+            }
+        }
+
+        @keyframes wiggle {
+            0%, 100% {
+                transform: rotate(0);
+            }
+
+            25% {
+                transform: rotate(-8deg);
+            }
+
+            75% {
+                transform: rotate(8deg);
+            }
+        }
+
+        @media (max-width: 480px) {
+            header h1 {
+                font-size: 28px;
+            }
+
+            form {
+                flex-direction: column;
+            }
+
+            button#send {
+                width: 100%;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            * {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div class="logo">🧮</div>
+            <h1>Hesap Dostu</h1>
+            <p>Bir hesap sor, dostun cevabı bulsun!</p>
+            <span id="status" class="badge">
+                <span class="dot"></span>
+                <span id="statusText">Kontrol ediliyor...</span>
+            </span>
+        </header>
+
+        <div class="chips" id="chips"></div>
+
+        <form id="f">
+            <input id="q" maxlength="200" placeholder="Bir hesap yaz, örn: 8 ile 3'ü çarp" autocomplete="off" required>
+            <button id="send" type="submit">Hesapla</button>
+        </form>
+
+        <div id="answer"></div>
+    </main>
+
+    <script>
+        const EXAMPLES = [
+            "8 ile 3'ü çarp, sonra 2 ile topla",
+            "2 üzeri 10 kaç?",
+            "144'ün karekökü nedir?",
+            "5 faktöriyel kaç?",
+            "200'ün yüzde 15'i kaç?",
+            "bugün saat kaç?"
+        ];
+
+        const $ = (id) => document.getElementById(id);
+        const form = $("f");
+        const input = $("q");
+        const answer = $("answer");
+        const button = $("send");
+        const statusEl = $("status");
+        const statusText = $("statusText");
+        const chipsEl = $("chips");
+
+        function el(tag, text, cls) {
+            const e = document.createElement(tag);
+            if (text) e.textContent = text;
+            if (cls) e.className = cls;
+            return e;
+        }
+
+        function setStatus(online) {
+            statusEl.className = "badge " + (online ? "on" : "off");
+            statusText.textContent = online
+                ? "Hesap Dostu uyanık!"
+                : "Şu an uyuyor 😴 Biraz sonra tekrar dene";
+        }
+
+        async function checkHealth() {
+            try {
+                const r = await fetch("/health", { cache: "no-store" });
+                const data = await r.json();
+                const online = r.ok && data.ok === true;
+                setStatus(online);
+                return online;
+            } catch {
+                setStatus(false);
+                return false;
+            }
+        }
+
+        function showMessage(text, kind) {
+            answer.innerHTML = "";
+            answer.append(el("div", text, "step " + kind));
+        }
+
+        function render(data) {
+            answer.innerHTML = "";
+            data.steps.forEach((s, i) => {
+                let box;
+                if (s.type === "tool") {
+                    box = el("div", "", "step tool");
+                    box.append(
+                        el("div", `🔧 ${s.name} aracı çalıştı`, "title"),
+                        el("div", `girdi: ${s.args}`, "muted"),
+                        el("div", `sonuç: ${s.result}`, "muted")
+                    );
+                } else if (s.type === "pending") {
+                    box = el("div", "", "step pending");
+                    box.append(
+                        el("div", `✋ Onay bekleniyor → ${s.name}`, "title"),
+                        el("div", `girdi: ${s.args}`, "muted")
+                    );
+                    const btn = el("button", "Onayla");
+                    const out = el("div", "", "muted");
+                    btn.addEventListener("click", async () => {
+                        btn.disabled = true;
+                        const r = await fetch("/onayla?id=" + encodeURIComponent(s.id));
+                        out.textContent = "sonuç: " + (await r.text());
+                    });
+                    box.append(btn, out);
+                } else {
+                    box = el("div", "", "step final");
+                    box.append(el("div", "🎉 Cevap", "title"), el("div", s.text));
+                }
+                box.style.animationDelay = `${i * 150}ms`;
+                answer.append(box);
+            });
+        }
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const q = input.value.trim();
+            if (!q) return;
+
+            if (!(await checkHealth())) {
+                showMessage("Hesap Dostu şu an uyuyor 😴 Biraz sonra tekrar dene.", "error");
+                return;
+            }
+
+            button.disabled = true;
+            const thinking = el("div", "Düşünüyorum", "step");
+            const dots = el("div", "", "thinking");
+            for (let i = 0; i < 3; i++) dots.append(document.createElement("span"));
+            thinking.append(dots);
+            answer.innerHTML = "";
+            answer.append(thinking);
+
+            try {
+                const res = await fetch("/agent?q=" + encodeURIComponent(q));
+                if (res.status === 429) return showMessage("Çok hızlı denedin! Biraz bekleyip tekrar dene ⏳", "error");
+                if (res.status === 400) return showMessage("Sorunu biraz kısa yazar mısın? En fazla 200 karakter.", "error");
+                if (!res.ok) return showMessage("Hesap Dostu şu an uyuyor 😴 Biraz sonra tekrar dene.", "error");
+                render(await res.json());
+            } catch {
+                showMessage("Bağlantı kurulamadı. İnternetini kontrol edip tekrar dene.", "error");
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        for (const ex of EXAMPLES) {
+            const c = el("button", ex, "chip");
+            c.type = "button";
+            c.addEventListener("click", () => {
+                input.value = ex;
+                form.requestSubmit();
+            });
+            chipsEl.append(c);
+        }
+
+        checkHealth();
+        setInterval(checkHealth, 30000);
+    </script>
+</body>
+</html>
