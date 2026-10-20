@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>AgentCalc</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; padding: 8px; font-size: 16px; }
+    button { padding: 8px 16px; font-size: 16px; }
+    #answer { margin-top: 24px; white-space: pre-wrap; background: #f4f4f4; padding: 12px; border-radius: 6px; min-height: 40px; }
+  </style>
+</head>
+<body>
+  <h2>AgentCalc</h2>
+  <form id="f">
+    <input id="q" placeholder="Örn: 8 ile 3'ü çarp, sonra 2 ile topla" autocomplete="off" required>
+    <button id="send">Gönder</button>
+  </form>
+  <div id="answer"></div>
+
+  <script>
+    const form = document.getElementById("f");
+    const input = document.getElementById("q");
+    const answer = document.getElementById("answer");
+    const button = document.getElementById("send");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (!q) return;
+
+      button.disabled = true;
+      answer.textContent = "Düşünüyor...";
+      try {
+        const res = await fetch("/agent?q=" + encodeURIComponent(q));
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        answer.textContent = await res.text();
+      } catch (err) {
+        answer.textContent = "Hata: " + err.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

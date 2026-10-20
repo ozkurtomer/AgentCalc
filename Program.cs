@@ -1,8 +1,6 @@
 using AgentCalc;
 using System.Globalization;
-using System.Net.Http.Json;
 using System.Text.Json;
-using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +11,9 @@ builder.Services.AddHttpClient("ollama", c =>
 });
 
 var app = builder.Build();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.MapGet("/ask", async (string q, IHttpClientFactory factory) =>
 {
