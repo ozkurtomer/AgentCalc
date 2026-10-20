@@ -76,7 +76,8 @@ var tools = new object[]
     TwoNumberTool("topla", "İki sayıyı toplar"),
     TwoNumberTool("cikar", "İki sayıyı çıkarır: a - b"),
     TwoNumberTool("carp", "İki sayıyı çarpar"),
-    TwoNumberTool("bol", "İki sayıyı böler: a / b")
+    TwoNumberTool("bol", "İki sayıyı böler: a / b"),
+    NoArgTool("simdi", "Şu anki tarih ve saati döndürür")
 };
 
 app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
@@ -134,6 +135,9 @@ static string RunTool(string name, JsonElement args)
 {
     try
     {
+        if (name == "simdi")
+            return DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
         double a = args.GetProperty("a").GetDouble();
         double b = args.GetProperty("b").GetDouble();
 
@@ -168,6 +172,22 @@ static object TwoNumberTool(string name, string description) => new
                 b = new { type = "number", description = "ikinci sayı" }
             },
             required = new[] { "a", "b" }
+        }
+    }
+};
+
+static object NoArgTool(string name, string description) => new
+{
+    type = "function",
+    function = new
+    {
+        name,
+        description,
+        parameters = new
+        {
+            type = "object",
+            properties = new { },
+            required = Array.Empty<string>()
         }
     }
 };
