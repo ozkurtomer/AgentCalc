@@ -49,14 +49,14 @@ app.MapGet("/tool-test", async (string q, IHttpClientFactory factory) =>
                 function = new
                 {
                     name = "topla",
-                    description = "İki sayıyı toplar",
+                    description = "Ä°ki sayÄ±yÄ± toplar",
                     parameters = new
                     {
                         type = "object",
                         properties = new
                         {
-                            a = new { type = "number", description = "ilk sayı" },
-                            b = new { type = "number", description = "ikinci sayı" }
+                            a = new { type = "number", description = "ilk sayÄ±" },
+                            b = new { type = "number", description = "ikinci sayÄ±" }
                         },
                         required = new[] { "a", "b" }
                     }
@@ -73,17 +73,17 @@ app.MapGet("/tool-test", async (string q, IHttpClientFactory factory) =>
 
 var tools = new object[]
 {
-    TwoNumberTool("topla", "İki sayıyı toplar"),
-    TwoNumberTool("cikar", "İki sayıyı çıkarır: a - b"),
-    TwoNumberTool("carp", "İki sayıyı çarpar"),
-    TwoNumberTool("bol", "İki sayıyı böler: a / b")
+    TwoNumberTool("topla", "Ä°ki sayÄ±yÄ± toplar"),
+    TwoNumberTool("cikar", "Ä°ki sayÄ±yÄ± Ã§Ä±karÄ±r: a - b"),
+    TwoNumberTool("carp", "Ä°ki sayÄ±yÄ± Ã§arpar"),
+    TwoNumberTool("bol", "Ä°ki sayÄ±yÄ± bÃ¶ler: a / b")
 };
 
 app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
 {
     var http = factory.CreateClient("ollama");
     var messages = new List<object> { new { role = "user", content = q } };
-
+    var steps = new List<object>();
     const int maxTurns = 5;
 
     for (int turn = 1; turn <= maxTurns; turn++)
@@ -92,7 +92,11 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
         var msg = res.GetProperty("message");
 
         if (!msg.TryGetProperty("tool_calls", out var calls))
-            return msg.GetProperty("content").GetString();
+        {
+            var answer = msg.GetProperty("content").GetString() ?? "";
+            steps.Add(new { turn, type = "answer", text = answer });
+            return Results.Json(new { answer, steps });
+        }
 
         messages.Add(new { role = "assistant", content = "", tool_calls = calls });
 
@@ -101,13 +105,14 @@ app.MapGet("/agent", async (string q, IHttpClientFactory factory) =>
             var fn = call.GetProperty("function");
             var name = fn.GetProperty("name").GetString() ?? "";
             var args = fn.GetProperty("arguments");
+            var result = RunTool(name, args);
 
-            string result = RunTool(name, args);
             messages.Add(new { role = "tool", content = result });
+            steps.Add(new { turn, type = "tool", name, args = args.GetRawText(), result });
         }
     }
 
-    return "Üst sınıra ulaşıldı, işlem tamamlanamadı.";
+    return Results.Json(new { answer = "Ãœst sÄ±nÄ±ra ulaÅŸÄ±ldÄ±.", steps });
 });
 
 app.Run();
@@ -138,7 +143,7 @@ static string RunTool(string name, JsonElement args)
             "cikar" => Calculator.Cikar(a, b).ToString(CultureInfo.InvariantCulture),
             "carp" => Calculator.Carp(a, b).ToString(CultureInfo.InvariantCulture),
             "bol" => Calculator.Bol(a, b).ToString(CultureInfo.InvariantCulture),
-            _ => $"Bilinmeyen araç: {name}"
+            _ => $"Bilinmeyen araÃ§: {name}"
         };
     }
     catch (Exception ex)
@@ -159,12 +164,10 @@ static object TwoNumberTool(string name, string description) => new
             type = "object",
             properties = new
             {
-                a = new { type = "number", description = "ilk sayı" },
-                b = new { type = "number", description = "ikinci sayı" }
+                a = new { type = "number", description = "ilk sayÄ±" },
+                b = new { type = "number", description = "ikinci sayÄ±" }
             },
             required = new[] { "a", "b" }
         }
     }
 };
-
-app.Run();
